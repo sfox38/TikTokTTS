@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration that provides Text-to-Speech using TikTok's voice engine, supporting a wide range of languages and expressive voices.
 
-<img src="https://github.com/sfox38/tiktoktts/blob/main/examples/dash-custom-v1.2.jpg" width="50%" alttext="dashboard">
+<img src="https://raw.githubusercontent.com/sfox38/tiktoktts/main/examples/dash-custom-v1.2.jpg" width="50%" alt="TikTok TTS dashboard card">
 
 
 ## Credits & Attribution
@@ -15,7 +15,7 @@ A Home Assistant custom integration that provides Text-to-Speech using TikTok's 
 | **Fork author** | Steven Fox | [sfox38/tiktoktts](https://github.com/sfox38/tiktoktts) |
 
 > [!NOTE]
-> This fork modernises the original integration for current Home Assistant versions, fixes several bugs, adds a UI config flow, over 3x more voices, direct API mode with endpoint fallback, automatic text chunking, a Random Voice feature, support entities plus a custom dashboard card, improved error handling, and improved documentation.
+> This fork modernises the original integration for current Home Assistant versions, fixes several bugs, adds a UI config flow, more than triple the voices, direct API mode with endpoint fallback, automatic text chunking, a Random Voice feature, helper entities plus a custom dashboard card, improved error handling, and improved documentation.
 
 ---
 
@@ -91,7 +91,7 @@ Follow the [Installation](#installation) steps below. When you reach **Settings 
 
 ## Configuration
 
-After restarting, go to **Settings -> Devices & Services -> Add Integration** and search for **TikTokTTS**.
+After restarting, go to **Settings -> Devices & Services -> Add Integration** and search for **TikTok TTS**.
 
 ### Connection Modes
 
@@ -99,6 +99,11 @@ After restarting, go to **Settings -> Devices & Services -> Add Integration** an
 Uses the open-source proxy by [Weilbyte](https://github.com/Weilbyte/tiktok-tts). No TikTok account required. The default endpoint is `https://tiktok-tts.weilnet.workers.dev`.
 
 For better reliability, you can self-host your own proxy instance and enter its URL during setup. See the [Weilbyte repo](https://github.com/Weilbyte/tiktok-tts) for instructions.
+
+> [!NOTE]
+> **Privacy:** In proxy mode, your message text and chosen voice are sent to the proxy server (Weilbyte or your self-hosted instance) in plain text. The proxy forwards the request to TikTok on your behalf. If privacy is a concern, self-host your own proxy instance.
+
+If both proxy and direct API modes are configured, **proxy mode takes priority** for the Speak button and automations that do not specify an entity ID.
 
 #### Direct API ⚠️
 Calls TikTok's internal API directly using your TikTok session cookie.
@@ -166,13 +171,13 @@ data:
     voice: en_us_007
 ```
 
-The `language` field filters available voices in the Automations editor UI, however it is recommended to leave this blank. The `options.voice` field selects the specific voice. If you omit `options.voice`, the integration will use your configured default voice (if it matches the selected language) or the first available voice for the requested language.
+The `language` field filters available voices in the Automations editor UI, however it is recommended to leave this blank. The `options.voice` field selects the specific voice. If you omit `options.voice`, the integration uses your configured default voice if it belongs to the requested language, or falls back to the first available voice for that language.
 
 ### Random Voice
 
 You can configure a pool of language groups to draw from randomly on each `tts.speak` call. Press the 🎲 dice button next to the Speak button in the dashboard card to open the Random Voice settings panel. Tick the language groups you want included in the pool and press "Save and close". Once at least one language is selected, `🎲 Random Voice` appears as an option in the language dropdown with a single `Random Voice` voice option beneath it.
 
-A different voice is picked on every call -- the integration bypasses HA's in-memory TTS cache when random voice is active, so you always get a fresh voice regardless of message text or call source.
+A different voice is picked on every call. The Speak button automatically bypasses HA's TTS cache when random voice is active.
 
 To use random voice in an automation, pass `voice: random` in the options:
 
@@ -188,13 +193,13 @@ data:
 ```
 
 > [!NOTE]
-> The `cache` setting has no effect when `voice: random` is used. The integration always bypasses the cache for random voice calls to ensure a fresh voice is selected every time, regardless of whether you set `cache: true` or `cache: false`.
+> When calling `tts.speak` directly from an automation with `voice: random`, add `cache: false` to the action data. Home Assistant checks its audio file cache **before** calling the integration, so without `cache: false` a repeated message may replay previously cached audio rather than generating a new random voice.
 
 ### Voice Examples
 
 These samples were generated using TikTok TTS with a selection of English voices.
 > [!NOTE]
->Github doesn't support in-line audio, you will need to download these mp3 files first.
+> GitHub doesn't support inline audio playback - you will need to download these MP3 files first.
 
 | Sample | Voice ID |
 |---|---|
@@ -501,7 +506,7 @@ The community Weilbyte proxy is a free, volunteer-run service and may occasional
 TikTok session IDs expire periodically. If you see errors about an invalid or expired session ID, go to the integration options and update the value from your browser cookies.
 
 ### Message too long error
-The message text entity has a maximum length of 255 characters, which is enforced by HA's text entity platform. The dashboard card enforces this limit in the textarea. If you are calling `tts.speak` from an automation with a longer message, TikTok's direct API will handle chunking automatically - only the HA entity has the 255 character restriction.
+The message text entity has a maximum length of 255 characters, which is enforced by HA's text entity platform. The dashboard card enforces this limit in the textarea. If you are calling `tts.speak` from an automation with a longer message, the integration automatically splits it into chunks of up to 200 characters (direct API mode) or sends the full text in one request (proxy mode, which handles chunking server-side). Only the HA text entity has the 255-character restriction.
 
 ### Check the logs
 Go to **Settings -> System -> Logs** and filter for `tiktoktts` to find detailed error messages.
@@ -511,3 +516,4 @@ Go to **Settings -> System -> Logs** and filter for `tiktoktts` to find detailed
 ## Disclaimer
 
 This integration is not affiliated with, endorsed by, or connected to TikTok or ByteDance in any way. The direct API mode uses an unofficial, reverse-engineered endpoint. Use of the direct API mode may violate TikTok's Terms of Service.
+
