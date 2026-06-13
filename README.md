@@ -105,7 +105,7 @@ For better reliability, you can self-host your own proxy instance and enter its 
 
 If both proxy and direct API modes are configured, **proxy mode takes priority** for the Speak button and automations that do not specify an entity ID.
 
-#### Direct API ⚠️
+#### Direct API
 Calls TikTok's internal API directly using your TikTok session cookie.
 
 > [!IMPORTANT]
