@@ -20,7 +20,8 @@ How it works
    is busted automatically on each integration version bump.
 
 5. async_unregister() cleans up the resource entry when the last config
-   entry is removed. It is called from async_unload_entry in __init__.py.
+   entry is permanently deleted. It is called from async_remove_entry in
+   __init__.py (not async_unload_entry, which also fires on reload/disable).
 
 Note on imports
 ---------------
@@ -47,10 +48,18 @@ _DOMAIN        = "tiktoktts"
 _CARD_FILENAME = "tiktoktts-card.js"
 _URL_BASE      = f"/{_DOMAIN}"
 
-# Read the integration version from manifest.json so the card URL is
-# automatically cache-busted when the integration is updated.
-_MANIFEST = json.loads((Path(__file__).parent.parent / "manifest.json").read_text())
-_VERSION  = _MANIFEST.get("version", "0.0.0")
+def _read_version() -> str:
+    """Read the integration version from manifest.json.
+
+    Called lazily inside async_register via hass.async_add_executor_job so
+    the blocking file I/O does not run on the event loop at import time.
+    Falls back to "0.0.0" if the manifest cannot be parsed.
+    """
+    try:
+        manifest = json.loads((Path(__file__).parent.parent / "manifest.json").read_text())
+        return manifest.get("version", "0.0.0")
+    except Exception:  # noqa: BLE001
+        return "0.0.0"
 
 
 class JSModuleRegistration:
@@ -71,7 +80,10 @@ class JSModuleRegistration:
         Always registers the HTTP path so the JS file is serveable.
         Then registers the Lovelace resource only if Lovelace is in
         storage mode — YAML mode users must add the resource manually.
+        Reads the version from manifest.json via an executor job so the
+        blocking file I/O does not run on the event loop.
         """
+        self._version = await self.hass.async_add_executor_job(_read_version)
         await self._async_register_path()
         await self._async_wait_for_lovelace_resources()
 
@@ -146,11 +158,14 @@ class JSModuleRegistration:
         loaded. If the version matches, does nothing.
         """
         url      = f"{_URL_BASE}/{_CARD_FILENAME}"
-        full_url = f"{url}?v={_VERSION}"
+        full_url = f"{url}?v={self._version}"
 
+        # Match on the exact base URL (before any ?v= query string) so we
+        # don't accidentally match other resources that merely start with
+        # the same path prefix.
         existing = [
             r for r in resources.async_items()
-            if r["url"].startswith(url)
+            if r["url"].split("?")[0] == url
         ]
 
         if not existing:
@@ -167,18 +182,18 @@ class JSModuleRegistration:
             else "0"
         )
 
-        if current_version != _VERSION:
+        if current_version != self._version:
             await resources.async_update_item(
                 resource["id"],
                 {"res_type": "module", "url": full_url},
             )
             _LOGGER.info(
                 "TikTokTTS: Lovelace card updated %s -> %s",
-                current_version, _VERSION,
+                current_version, self._version,
             )
         else:
             _LOGGER.debug(
-                "TikTokTTS: Lovelace card already registered at version %s", _VERSION
+                "TikTokTTS: Lovelace card already registered at version %s", self._version
             )
 
     async def async_unregister(self) -> None:
@@ -194,6 +209,6 @@ class JSModuleRegistration:
 
         url = f"{_URL_BASE}/{_CARD_FILENAME}"
         for resource in resources.async_items():
-            if resource["url"].startswith(url):
+            if resource["url"].split("?")[0] == url:
                 await resources.async_delete_item(resource["id"])
                 _LOGGER.debug("TikTokTTS: Lovelace card resource removed")

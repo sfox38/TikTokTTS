@@ -46,7 +46,8 @@ from __future__ import annotations
 from uuid import uuid4
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -188,10 +189,16 @@ class SpeakButtonEntity(ButtonEntity):
         )
 
     def _get_state(self, entity_id: str) -> str:
-        """Return the current state of an entity, or empty string if unavailable."""
+        """Return the current state of an entity, or empty string if unavailable.
+
+        Filters out STATE_UNKNOWN and STATE_UNAVAILABLE so callers never
+        accidentally speak the literal string "unavailable" or "unknown".
+        """
         state = self.hass.states.get(entity_id)
         if state is None:
             LOGGER.warning("TikTokTTS: entity %s not found in hass.states", entity_id)
+            return ""
+        if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             return ""
         return state.state
 
@@ -222,8 +229,6 @@ class SpeakButtonEntity(ButtonEntity):
         previously removed config entries, causing the button to target a
         TTS entity that no longer exists.
         """
-        from homeassistant.config_entries import ConfigEntryState
-
         entries = self.hass.config_entries.async_entries(DOMAIN)
         loaded = [e for e in entries if e.state == ConfigEntryState.LOADED]
 

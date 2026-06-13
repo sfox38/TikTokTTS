@@ -7,12 +7,12 @@ LOGGER: Logger = getLogger(__package__)
 # Integration identity
 # ---------------------------------------------------------------------------
 
-NAME = "TikTok TTS"
 DOMAIN = "tiktoktts"
-VERSION = "1.2.1"
 
 # ---------------------------------------------------------------------------
 # Attribution & credits
+# Shown as the 'attribution' attribute on the TTS entities.
+# Community TTS proxy by Weilbyte - https://github.com/Weilbyte/tiktok-tts
 # ---------------------------------------------------------------------------
 
 ORIGINAL_AUTHOR = "Philipp Lüttecke (@philipp-luettecke)"
@@ -20,20 +20,6 @@ ORIGINAL_REPO = "https://github.com/philipp-luettecke/tiktoktts"
 
 FORK_AUTHOR = "Steven Fox (@sfox38)"
 FORK_REPO = "https://github.com/sfox38/tiktoktts"
-
-PROXY_AUTHOR = "Weilbyte"
-PROXY_REPO = "https://github.com/Weilbyte/tiktok-tts"
-PROXY_ATTRIBUTION = (
-    f"Community TTS proxy by {PROXY_AUTHOR} - {PROXY_REPO}. "
-    "Self-hosting your own instance is recommended for reliability."
-)
-
-DIRECT_API_ATTRIBUTION = (
-    "Direct API mode uses TikTok's unofficial internal API, "
-    "reverse-engineered by the open-source community. "
-    "Use of this API may violate TikTok's Terms of Service. "
-    "Use at your own risk."
-)
 
 ATTRIBUTION = (
     f"Originally by {ORIGINAL_AUTHOR} ({ORIGINAL_REPO}). "
@@ -141,8 +127,15 @@ DIRECT_API_FIELD_AUDIO = "v_str"
 DIRECT_API_STATUS_OK = 0
 DIRECT_API_STATUS_INVALID_SESSION = 4
 
-# Max characters per API request (TikTok enforced limit)
+# Max characters per API request (TikTok enforced limit).
+# Note: the limit is counted in characters per community findings, but the
+# request is URL-encoded, so multibyte text (e.g. Japanese, Korean) produces
+# much longer encoded requests. If direct-mode requests for multibyte
+# languages are rejected, lower this value.
 DIRECT_API_CHUNK_SIZE = 200
+
+# HA repair issue ID raised when the direct API session_id is rejected
+ISSUE_SESSION_EXPIRED = "direct_api_session_expired"
 
 # ---------------------------------------------------------------------------
 # Audio
@@ -152,20 +145,27 @@ AUDIO_FORMAT = "mp3"
 
 # ---------------------------------------------------------------------------
 # Request behaviour
+#
+# REQUEST_* values apply to the proxy API and to the user's configured
+# direct endpoint. FALLBACK_* values apply to the automatic direct-mode
+# fallback endpoints - a single, shorter attempt each, so that a dead
+# session or regional outage doesn't stall TTS for minutes while every
+# endpoint is retried in full.
 # ---------------------------------------------------------------------------
 
-REQUEST_TIMEOUT = 20    # seconds
-REQUEST_MAX_RETRIES = 2
+REQUEST_TIMEOUT = 20       # seconds
+REQUEST_MAX_RETRIES = 2    # retries after the first attempt
 REQUEST_RETRY_DELAY = 1.5  # seconds between retries
+
+FALLBACK_TIMEOUT = 10      # seconds, per fallback endpoint
+FALLBACK_MAX_RETRIES = 0   # single attempt per fallback endpoint
 
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_ENDPOINT = DEFAULT_PROXY_ENDPOINT
 DEFAULT_VOICE = "en_us_001"
 DEFAULT_LANG = "en_us"
-DEFAULT_API_MODE = API_MODE_PROXY
 
 # ---------------------------------------------------------------------------
 # Supported voices
@@ -289,6 +289,9 @@ VOICES_BY_LANGUAGE: dict[str, list[str]] = {
 }
 
 SUPPORTED_LANGUAGES = list(VOICES_BY_LANGUAGE.keys())
+
+# Flat list of every supported voice code across all languages
+ALL_VOICES: list[str] = [v for codes in VOICES_BY_LANGUAGE.values() for v in codes]
 
 
 # ---------------------------------------------------------------------------

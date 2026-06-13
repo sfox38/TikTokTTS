@@ -37,6 +37,12 @@
  *     type: custom:tiktoktts-card
  */
 
+// Mic SVG used in the Speak button — defined once to avoid duplication.
+const _MIC_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
+  <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
+  <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/>
+</svg>`;
+
 class TikTokTTSCard extends HTMLElement {
   constructor() {
     super();
@@ -45,6 +51,7 @@ class TikTokTTSCard extends HTMLElement {
     this._isFocused       = false;
     this._voiceIdSelected = false;
     this._settingsOpen    = false;
+    this._debounceTimer   = null;
 
     this._entities = {
       language: "select.tiktoktts_language",
@@ -53,6 +60,9 @@ class TikTokTTSCard extends HTMLElement {
       message:  "text.tiktoktts_message",
       speak:    "button.tiktoktts_speak",
     };
+
+    // Track last-seen state strings to enable early-out in _updateStates.
+    this._lastStates = {};
   }
 
   // Called by HA when the card is added to a dashboard.
@@ -466,10 +476,7 @@ class TikTokTTSCard extends HTMLElement {
 
         <div class="action-row">
           <button class="speak-btn" id="btn-speak">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/>
-            </svg>
+            ${_MIC_SVG}
             Speak...
           </button>
           <button class="gear-btn" id="btn-gear" title="Random Voice Settings">🎲</button>
@@ -519,12 +526,12 @@ class TikTokTTSCard extends HTMLElement {
     // calling HA to avoid flooding the service bus on every keystroke.
     // Sends " " (single space) for empty input because HA's text entity
     // rejects truly empty strings with "required key not provided".
-    let _debounce;
     textarea.addEventListener("input", (e) => {
       const val = e.target.value;
       this._updateCharCount(val.length);
-      clearTimeout(_debounce);
-      _debounce = setTimeout(() => {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = setTimeout(() => {
+        this._debounceTimer = null;
         const truncated = val.slice(0, 255) || " ";
         this._callTextService(this._entities.message, truncated);
       }, 600);
@@ -571,12 +578,24 @@ class TikTokTTSCard extends HTMLElement {
   // -------------------------------------------------------------------------
 
   /** Sync all card controls to current HA entity states.
-   *  Called on every hass setter invocation (i.e. on any state change in HA). */
+   *  Called on every hass setter invocation (i.e. on any state change in HA).
+   *  Bails out early when none of the tracked entity states have changed. */
   _updateStates() {
     if (!this._hass || !this.shadowRoot.getElementById("sel-language")) return;
 
+    // Build a fingerprint of all relevant entity states + option lists.
+    // If nothing changed since last call, skip all DOM work.
+    const e = this._entities;
+    const fingerprint = [e.language, e.voice, e.device, e.message].map(id => {
+      const st = this._hass.states[id];
+      if (!st) return "";
+      return st.state + "|" + (st.attributes.options || []).join(",") +
+             "|" + (st.attributes.random_voice_languages || []).join(",");
+    }).join(";");
+    if (fingerprint === this._lastFingerprint) return;
+    this._lastFingerprint = fingerprint;
+
     const root = this.shadowRoot;
-    const e    = this._entities;
 
     // Language dropdown
     const langState = this._hass.states[e.language];
@@ -688,7 +707,7 @@ class TikTokTTSCard extends HTMLElement {
     this._hass.callService("select", "select_option", {
       entity_id: entityId,
       option:    value,
-    });
+    }).catch(err => console.error("TikTokTTS: select_option failed", err));
   }
 
   /** Call text.set_value to persist the message textarea content to HA. */
@@ -696,7 +715,7 @@ class TikTokTTSCard extends HTMLElement {
     this._hass.callService("text", "set_value", {
       entity_id: entityId,
       value:     value,
-    });
+    }).catch(err => console.error("TikTokTTS: set_value failed", err));
   }
 
   /** Toggle the random voice settings panel open/closed. */
@@ -714,38 +733,49 @@ class TikTokTTSCard extends HTMLElement {
     }
   }
 
-  /** Build the language checkbox list from LANGUAGE_NAMES data exposed via state attribute. */
+  /** Build the language checkbox list.
+   *
+   *  Sources the available language list from the entity's 'options' attribute
+   *  (automatically picks up new languages added to const.py). Uses a local
+   *  code->name map to resolve friendly names to API codes, which are what
+   *  set_random_voices expects. Checked state is derived from the entity's
+   *  random_voice_languages attribute.
+   */
   _buildCheckboxList() {
     const langState  = this._hass && this._hass.states[this._entities.language];
-    const savedLangs = langState
-      ? (langState.attributes.random_voice_languages || [])
-      : [];
+    if (!langState) return;
 
-    const LANGUAGE_NAMES = {
-      "en_us":  "English (US)",
-      "en_uk":  "English (UK)",
-      "en_au":  "English (AU)",
-      "disney": "Disney / Character",
-      "music":  "Music / Singing",
-      "fr":     "French",
-      "it":     "Italian",
-      "es":     "Spanish",
-      "es_mx":  "Spanish (Mexico)",
-      "de":     "German",
-      "pt_br":  "Portuguese (Brazil)",
-      "pt_pt":  "Portuguese (Portugal)",
-      "id":     "Indonesian",
-      "ja":     "Japanese",
-      "ko":     "Korean",
-      "vi":     "Vietnamese",
+    const savedLangs = langState.attributes.random_voice_languages || [];
+    // All options from the entity, minus the two meta-options that aren't real languages.
+    const allOptions = (langState.attributes.options || []).filter(
+      name => name !== "🌐 All Languages" && name !== "🎲 Random Voice"
+    );
+
+    const FALLBACK_NAMES = {
+      "en_us": "🇺🇸 English (US)", "en_uk": "🇬🇧 English (UK)",
+      "en_au": "🇦🇺 English (AU)", "disney": "🏰 Disney / Character",
+      "music": "🎵 Music / Singing", "fr": "🇫🇷 French",
+      "it": "🇮🇹 Italian", "es": "🇪🇸 Spanish",
+      "es_mx": "🇲🇽 Spanish (Mexico)", "de": "🇩🇪 German",
+      "pt_br": "🇧🇷 Portuguese (Brazil)", "pt_pt": "🇵🇹 Portuguese (Portugal)",
+      "id": "🇮🇩 Indonesian", "ja": "🇯🇵 Japanese",
+      "ko": "🇰🇷 Korean", "vi": "🇻🇳 Vietnamese",
     };
 
+    // Build reverse map: friendly name -> code, from both entity options and fallback.
+    const nameToCode = {};
+    for (const [code, name] of Object.entries(FALLBACK_NAMES)) nameToCode[name] = code;
+
+    // Saved codes -> set for O(1) lookup
+    const savedSet = new Set(savedLangs);
+
     const container = this.shadowRoot.getElementById("lang-checkbox-list");
-    container.innerHTML = Object.entries(LANGUAGE_NAMES).map(([code, name]) => {
-      const checked = savedLangs.includes(code) ? "checked" : "";
+    container.innerHTML = allOptions.map(name => {
+      const code    = nameToCode[name] || name;
+      const checked = savedSet.has(code) ? "checked" : "";
       return `
         <label class="lang-checkbox-item">
-          <input type="checkbox" value="${code}" ${checked}/>
+          <input type="checkbox" value="${this._esc(code)}" ${checked}/>
           <span>${this._esc(name)}</span>
         </label>`;
     }).join("");
@@ -771,26 +801,37 @@ class TikTokTTSCard extends HTMLElement {
   }
 
   /** Handle Speak button press.
-   *  Validates the message, disables the button briefly, calls button.press. */
+   *  Cancels any pending debounce and flushes the current textarea value to HA
+   *  before pressing the button, so the server always has the latest text even
+   *  if the user clicks Speak within 600ms of typing their last character. */
   async _speak() {
-    const btn = this.shadowRoot.getElementById("btn-speak");
-    const msg = this.shadowRoot.getElementById("inp-message").value.trim();
+    const btn      = this.shadowRoot.getElementById("btn-speak");
+    const textarea = this.shadowRoot.getElementById("inp-message");
+    const msg      = textarea.value.trim();
+
+    // Cancel pending debounce so we don't get a double write after the flush.
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
 
     if (!msg) {
       btn.textContent = "⚠️ No message!";
       setTimeout(() => {
         btn.disabled = false;
-        btn.innerHTML = `
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
-            <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/>
-          </svg>
-          Speak...`;
+        btn.innerHTML = `${_MIC_SVG} Speak...`;
       }, 2000);
       return;
     }
 
-    btn.disabled  = true;
+    // Flush the current textarea value to HA synchronously before pressing
+    // the button so button.py reads the latest text, not the last debounced value.
+    await this._hass.callService("text", "set_value", {
+      entity_id: this._entities.message,
+      value:     msg.slice(0, 255),
+    }).catch(err => console.error("TikTokTTS: pre-speak flush failed", err));
+
+    btn.disabled    = true;
     btn.textContent = "Speaking…";
 
     try {
@@ -801,13 +842,8 @@ class TikTokTTSCard extends HTMLElement {
       console.error("TikTokTTS: speak failed", err);
     } finally {
       setTimeout(() => {
-        btn.disabled = false;
-        btn.innerHTML = `
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
-            <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/>
-          </svg>
-          Speak...`;
+        btn.disabled  = false;
+        btn.innerHTML = `${_MIC_SVG} Speak...`;
       }, 2000);
     }
   }

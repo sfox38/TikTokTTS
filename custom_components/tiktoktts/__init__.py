@@ -113,6 +113,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, CoreState, EVENT_HOMEASSISTANT_STARTED
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.typing import ConfigType
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -142,7 +143,7 @@ _STORAGE_KEY     = f"{DOMAIN}_random_voices"
 _STORAGE_VERSION = 1
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register the Lovelace card resource and initialize the random voice store.
 
     This must run in async_setup (not async_setup_entry) so it executes
@@ -285,7 +286,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         if is_last_entry:
             LOGGER.debug("Last TikTokTTS config entry unloaded - clearing all data")
-            await JSModuleRegistration(hass).async_unregister()
             hass.data.pop(DOMAIN, None)
         elif had_shared and DOMAIN in hass.data:
             # The entry that owned the shared platforms was disabled/removed
@@ -312,6 +312,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clean up when a config entry is permanently deleted.
+
+    Called by HA only on true removal (not on reload or disable). This is the
+    correct place to remove the Lovelace card resource so it is not wiped on
+    every options save or integration reload (which both trigger
+    async_unload_entry but NOT this function).
+    """
+    remaining = hass.config_entries.async_entries(DOMAIN)
+    if not remaining:
+        LOGGER.debug("Last TikTokTTS entry removed - unregistering Lovelace card")
+        await JSModuleRegistration(hass).async_unregister()
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

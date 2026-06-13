@@ -88,11 +88,6 @@ class MessageTextEntity(TextEntity, RestoreEntity):
                 else last_state.state,
             )
 
-    @property
-    def native_value(self) -> str:
-        """Return the current message text."""
-        return self._attr_native_value
-
     async def async_set_value(self, value: str) -> None:
         """Handle the user typing a new message."""
         self._attr_native_value = value

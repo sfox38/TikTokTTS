@@ -35,6 +35,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResu
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.issue_registry import async_delete_issue
 
 from .const import (
     API_MODE_DIRECT,
@@ -43,10 +44,11 @@ from .const import (
     CONF_ENDPOINT,
     CONF_SESSION_ID,
     CONF_VOICE,
-    DEFAULT_ENDPOINT,
+    DEFAULT_PROXY_ENDPOINT,
     DEFAULT_VOICE,
     DIRECT_API_AID_VALUE,
     DIRECT_API_ENDPOINTS,
+    DIRECT_API_FIELD_STATUS_CODE,
     DIRECT_API_MAP_TYPE_VALUE,
     DIRECT_API_PARAM_AID,
     DIRECT_API_PARAM_MAP_TYPE,
@@ -56,6 +58,7 @@ from .const import (
     DIRECT_API_STATUS_OK,
     DIRECT_API_USER_AGENT,
     DOMAIN,
+    ISSUE_SESSION_EXPIRED,
     LOGGER,
     PROXY_API_FIELD_AVAILABLE,
     PROXY_API_PATH_STATUS,
@@ -133,7 +136,7 @@ async def _test_direct_endpoint(
             )
             if resp.status == 200:
                 data = await resp.json()
-                if data.get("status_code") == DIRECT_API_STATUS_OK:
+                if data.get(DIRECT_API_FIELD_STATUS_CODE) == DIRECT_API_STATUS_OK:
                     return None   # Success - endpoint accepted the session_id
                 LOGGER.debug(
                     "Direct API test rejected: %s", data.get("status_msg", "unknown")
@@ -234,12 +237,12 @@ class TikTokTTSConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="proxy",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_ENDPOINT, default=DEFAULT_ENDPOINT): cv.string,
+                    vol.Required(CONF_ENDPOINT, default=DEFAULT_PROXY_ENDPOINT): cv.string,
                     vol.Required(CONF_VOICE, default=DEFAULT_VOICE): vol.In([v for codes in VOICES_BY_LANGUAGE.values() for v in codes]),
                 }
             ),
             errors=errors,
-            description_placeholders={"default_endpoint": DEFAULT_ENDPOINT},
+            description_placeholders={"default_endpoint": DEFAULT_PROXY_ENDPOINT},
         )
 
     async def async_step_direct(
@@ -348,6 +351,7 @@ class TikTokTTSOptionsFlow(OptionsFlow):
             else:
                 if api_mode == API_MODE_PROXY:
                     error = await _test_proxy_endpoint(self.hass, endpoint)
+                    session_id = None
                 else:
                     session_id = user_input.get(CONF_SESSION_ID, "").strip()
                     error = await _test_direct_endpoint(self.hass, endpoint, session_id)
@@ -355,10 +359,22 @@ class TikTokTTSOptionsFlow(OptionsFlow):
                 if error:
                     errors["base"] = error
                 else:
-                    updated_data = {**current, **user_input}
+                    # Build sanitized data: merge current with sanitized values
+                    # (do NOT spread raw user_input - it may contain unsanitized strings)
+                    sanitized: dict = {
+                        **current,
+                        CONF_ENDPOINT: endpoint,
+                        CONF_VOICE: user_input[CONF_VOICE],
+                    }
+                    if session_id is not None:
+                        sanitized[CONF_SESSION_ID] = session_id
                     self.hass.config_entries.async_update_entry(
-                        self.config_entry, data=updated_data
+                        self.config_entry, data=sanitized
                     )
+                    # Clear the session-expired repair issue if a direct-mode
+                    # test just succeeded - the user has provided a valid session_id.
+                    if api_mode == API_MODE_DIRECT:
+                        async_delete_issue(self.hass, DOMAIN, ISSUE_SESSION_EXPIRED)
                     return self.async_create_entry(title="", data={})
 
         # Build the form schema, choosing fields appropriate to the current mode.
@@ -369,7 +385,7 @@ class TikTokTTSOptionsFlow(OptionsFlow):
                 {
                     vol.Required(
                         CONF_ENDPOINT,
-                        default=current.get(CONF_ENDPOINT, DEFAULT_ENDPOINT),
+                        default=current.get(CONF_ENDPOINT, DEFAULT_PROXY_ENDPOINT),
                     ): cv.string,
                     vol.Required(
                         CONF_VOICE,

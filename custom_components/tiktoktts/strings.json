@@ -33,8 +33,7 @@
       "endpoint_connection_error": "Could not connect to the endpoint. Check the URL is correct.",
       "endpoint_unknown_error": "An unexpected error occurred while testing the endpoint.",
       "direct_api_rejected": "TikTok rejected the request. Your session ID may be invalid or expired.",
-      "invalid_url_scheme": "The endpoint URL must start with http:// or https://.",
-      "unknown": "An unknown error occurred."
+      "invalid_url_scheme": "The endpoint URL must start with http:// or https://."
     },
     "abort": {
       "already_configured": "TikTok TTS is already configured."
