@@ -735,43 +735,23 @@ class TikTokTTSCard extends HTMLElement {
 
   /** Build the language checkbox list.
    *
-   *  Sources the available language list from the entity's 'options' attribute
-   *  (automatically picks up new languages added to const.py). Uses a local
-   *  code->name map to resolve friendly names to API codes, which are what
-   *  set_random_voices expects. Checked state is derived from the entity's
-   *  random_voice_languages attribute.
+   *  Sources both the code and the friendly name from the language entity's
+   *  'language_options' attribute (a list of {code, name} for the real
+   *  languages). This is the single source of truth in const.py, so the card
+   *  never has to keep its own copy of the name table in sync - and the
+   *  checkbox value is always the API code set_random_voices expects,
+   *  regardless of the exact emoji used in the label. Checked state is derived
+   *  from the entity's random_voice_languages attribute.
    */
   _buildCheckboxList() {
-    const langState  = this._hass && this._hass.states[this._entities.language];
+    const langState = this._hass && this._hass.states[this._entities.language];
     if (!langState) return;
 
-    const savedLangs = langState.attributes.random_voice_languages || [];
-    // All options from the entity, minus the two meta-options that aren't real languages.
-    const allOptions = (langState.attributes.options || []).filter(
-      name => name !== "🌐 All Languages" && name !== "🎲 Random Voice"
-    );
-
-    const FALLBACK_NAMES = {
-      "en_us": "🇺🇸 English (US)", "en_uk": "🇬🇧 English (UK)",
-      "en_au": "🇦🇺 English (AU)", "disney": "🏰 Disney / Character",
-      "music": "🎵 Music / Singing", "fr": "🇫🇷 French",
-      "it": "🇮🇹 Italian", "es": "🇪🇸 Spanish",
-      "es_mx": "🇲🇽 Spanish (Mexico)", "de": "🇩🇪 German",
-      "pt_br": "🇧🇷 Portuguese (Brazil)", "pt_pt": "🇵🇹 Portuguese (Portugal)",
-      "id": "🇮🇩 Indonesian", "ja": "🇯🇵 Japanese",
-      "ko": "🇰🇷 Korean", "vi": "🇻🇳 Vietnamese",
-    };
-
-    // Build reverse map: friendly name -> code, from both entity options and fallback.
-    const nameToCode = {};
-    for (const [code, name] of Object.entries(FALLBACK_NAMES)) nameToCode[name] = code;
-
-    // Saved codes -> set for O(1) lookup
-    const savedSet = new Set(savedLangs);
+    const savedSet     = new Set(langState.attributes.random_voice_languages || []);
+    const langOptions  = langState.attributes.language_options || [];
 
     const container = this.shadowRoot.getElementById("lang-checkbox-list");
-    container.innerHTML = allOptions.map(name => {
-      const code    = nameToCode[name] || name;
+    container.innerHTML = langOptions.map(({ code, name }) => {
       const checked = savedSet.has(code) ? "checked" : "";
       return `
         <label class="lang-checkbox-item">

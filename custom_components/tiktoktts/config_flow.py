@@ -38,6 +38,7 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.issue_registry import async_delete_issue
 
 from .const import (
+    ALL_VOICES,
     API_MODE_DIRECT,
     API_MODE_PROXY,
     CONF_API_MODE,
@@ -58,11 +59,13 @@ from .const import (
     DIRECT_API_STATUS_OK,
     DIRECT_API_USER_AGENT,
     DOMAIN,
+    FORK_REPO,
     ISSUE_SESSION_EXPIRED,
     LOGGER,
+    ORIGINAL_REPO,
     PROXY_API_FIELD_AVAILABLE,
     PROXY_API_PATH_STATUS,
-    VOICES_BY_LANGUAGE,
+    WEILBYTE_REPO,
 )
 
 # Timeout (seconds) used only during connection tests in this file.
@@ -198,7 +201,11 @@ class TikTokTTSConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 }
             ),
-            description_placeholders={},
+            description_placeholders={
+                "weilbyte_url": WEILBYTE_REPO,
+                "original_url": ORIGINAL_REPO,
+                "fork_url": FORK_REPO,
+            },
         )
 
     async def async_step_proxy(
@@ -238,11 +245,14 @@ class TikTokTTSConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_ENDPOINT, default=DEFAULT_PROXY_ENDPOINT): cv.string,
-                    vol.Required(CONF_VOICE, default=DEFAULT_VOICE): vol.In([v for codes in VOICES_BY_LANGUAGE.values() for v in codes]),
+                    vol.Required(CONF_VOICE, default=DEFAULT_VOICE): vol.In(ALL_VOICES),
                 }
             ),
             errors=errors,
-            description_placeholders={"default_endpoint": DEFAULT_PROXY_ENDPOINT},
+            description_placeholders={
+                "default_endpoint": DEFAULT_PROXY_ENDPOINT,
+                "weilbyte_url": WEILBYTE_REPO,
+            },
         )
 
     async def async_step_direct(
@@ -285,7 +295,7 @@ class TikTokTTSConfigFlow(ConfigFlow, domain=DOMAIN):
                         DIRECT_API_ENDPOINTS
                     ),
                     vol.Required(CONF_SESSION_ID): cv.string,
-                    vol.Required(CONF_VOICE, default=DEFAULT_VOICE): vol.In([v for codes in VOICES_BY_LANGUAGE.values() for v in codes]),
+                    vol.Required(CONF_VOICE, default=DEFAULT_VOICE): vol.In(ALL_VOICES),
                 }
             ),
             errors=errors,
@@ -390,7 +400,7 @@ class TikTokTTSOptionsFlow(OptionsFlow):
                     vol.Required(
                         CONF_VOICE,
                         default=current.get(CONF_VOICE, DEFAULT_VOICE),
-                    ): vol.In([v for codes in VOICES_BY_LANGUAGE.values() for v in codes]),
+                    ): vol.In(ALL_VOICES),
                 }
             )
         else:
@@ -407,7 +417,7 @@ class TikTokTTSOptionsFlow(OptionsFlow):
                     vol.Required(
                         CONF_VOICE,
                         default=current.get(CONF_VOICE, DEFAULT_VOICE),
-                    ): vol.In([v for codes in VOICES_BY_LANGUAGE.values() for v in codes]),
+                    ): vol.In(ALL_VOICES),
                 }
             )
 

@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "TikTok TTS — Choose API Mode",
-        "description": "Select how this integration connects to TikTok TTS.\n\n**Community Proxy** (recommended) — No TikTok account needed. Uses the open-source proxy by [Weilbyte](https://github.com/Weilbyte/tiktok-tts). You can self-host your own instance for better reliability.\n\n**Direct API** — Calls TikTok's servers directly using your TikTok session cookie. Requires a TikTok account and may violate TikTok's Terms of Service.\n\n---\n*Originally by [@philipp-luettecke](https://github.com/philipp-luettecke/tiktoktts). Forked and extended by [@sfox38](https://github.com/sfox38/tiktoktts).*",
+        "description": "Select how this integration connects to TikTok TTS.\n\n**Community Proxy** (recommended) — No TikTok account needed. Uses the open-source proxy by [Weilbyte]({weilbyte_url}). You can self-host your own instance for better reliability.\n\n**Direct API** — Calls TikTok's servers directly using your TikTok session cookie. Requires a TikTok account and may violate TikTok's Terms of Service.\n\n---\n*Originally by [@philipp-luettecke]({original_url}). Forked and extended by [@sfox38]({fork_url}).*",
         "data": {
           "api_mode": "Connection mode"
         }
       },
       "proxy": {
         "title": "TikTok TTS — Proxy Configuration",
-        "description": "The default endpoint is the community proxy hosted by [Weilbyte](https://github.com/Weilbyte/tiktok-tts). For better reliability you can self-host your own instance and enter its URL here.",
+        "description": "The default endpoint is the community proxy hosted by [Weilbyte]({weilbyte_url}). For better reliability you can self-host your own instance and enter its URL here.",
         "data": {
           "api_endpoint": "Proxy endpoint URL",
           "voice": "Default voice"

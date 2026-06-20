@@ -1,5 +1,4 @@
 {
   "name": "TikTok TTS",
-  "render_readme": true,
-  "category": "integration"
+  "render_readme": true
 }

@@ -111,24 +111,29 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, CoreState, EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
     DOMAIN,
-    HASS_DATA_BUTTON_CREATED,
     HASS_DATA_LANGUAGE_ENTITY,
     HASS_DATA_RANDOM_LANGS,
     HASS_DATA_RANDOM_STORE,
-    HASS_DATA_SELECT_CREATED,
-    HASS_DATA_TEXT_CREATED,
     LOGGER,
     SERVICE_SET_RANDOM_VOICES,
     SUPPORTED_LANGUAGES,
 )
 from .frontend import JSModuleRegistration
+from .shared import (
+    clear_shared_forwarded,
+    has_forwarded_shared,
+    is_shared_owner,
+    mark_shared_forwarded,
+    release_shared_ownership,
+    schedule_rehome_to_survivor,
+)
 
 PLATFORMS: list[Platform] = [Platform.TTS, Platform.SELECT, Platform.TEXT, Platform.BUTTON]
 
@@ -142,14 +147,17 @@ SHARED_PLATFORMS: list[Platform] = [Platform.SELECT, Platform.TEXT, Platform.BUT
 _STORAGE_KEY     = f"{DOMAIN}_random_voices"
 _STORAGE_VERSION = 1
 
+# This integration is configured only via the UI config flow; it has no YAML
+# configuration. Declaring this satisfies hassfest's requirement that an
+# integration implementing async_setup defines a config schema.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the Lovelace card resource and initialize the random voice store.
+    """Register the Lovelace card module and initialize the random voice store.
 
     This must run in async_setup (not async_setup_entry) so it executes
     exactly once per HA startup regardless of how many config entries exist.
-    Registration is deferred until homeassistant_started if HA is still
-    starting up, ensuring Lovelace resources are fully loaded first.
     """
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
@@ -165,7 +173,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.data[DOMAIN][HASS_DATA_RANDOM_LANGS] = langs
     LOGGER.debug("Random voice languages loaded: %s", langs)
 
-    async def _handle_set_random_voices(call) -> None:
+    async def _handle_set_random_voices(call: ServiceCall) -> None:
         languages = call.data.get("languages", [])
         valid = [lang for lang in languages if lang in SUPPORTED_LANGUAGES]
         invalid = [lang for lang in languages if lang not in SUPPORTED_LANGUAGES]
@@ -188,13 +196,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         }),
     )
 
-    async def _register_frontend(_event=None) -> None:
-        await JSModuleRegistration(hass).async_register()
-
-    if hass.state == CoreState.running:
-        await _register_frontend()
-    else:
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_frontend)
+    # Register the Lovelace card module. The registration uses
+    # frontend.add_extra_js_url, which simply adds the card to the frontend's
+    # module list (read per page render), so there is nothing to wait for - no
+    # deferral until homeassistant_started is needed.
+    await JSModuleRegistration(hass).async_register()
 
     return True
 
@@ -235,15 +241,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Always set up the TTS platform for this entry.
     await hass.config_entries.async_forward_entry_setups(entry, TTS_PLATFORMS)
 
-    # Only set up the shared platforms (select, text, button) once across all
-    # entries. The singleton guards inside each platform's async_setup_entry
-    # prevent duplicate entity creation, but HA itself raises a ValueError if
-    # the same platform is set up for the same config entry twice. So we track
-    # whether we have already forwarded the shared platforms for each entry.
-    shared_setup_key = f"shared_platforms_setup_{entry.entry_id}"
-    if not hass.data[DOMAIN].get(shared_setup_key):
+    # Forward the shared platforms (select, text, button) for this entry. The
+    # singleton guards inside each platform's async_setup_entry prevent duplicate
+    # entity creation, but HA raises a ValueError if the same platform is set up
+    # for the same config entry twice, so guard the forward per entry.
+    if not has_forwarded_shared(hass, entry):
         await hass.config_entries.async_forward_entry_setups(entry, SHARED_PLATFORMS)
-        hass.data[DOMAIN][shared_setup_key] = True
+        mark_shared_forwarded(hass, entry)
 
     entry.async_on_unload(
         entry.add_update_listener(_async_update_listener)
@@ -273,45 +277,44 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     remaining = hass.config_entries.async_entries(DOMAIN)
     is_last_entry = len(remaining) <= 1
 
-    # Determine which platforms to unload for this entry.
-    # Shared platforms (select, text, button) are only unloaded if they were
-    # set up for this specific entry, which only happens for the first entry
-    # that was set up. For all other entries only the TTS platform was set up.
-    shared_setup_key = f"shared_platforms_setup_{entry.entry_id}"
-    had_shared = hass.data.get(DOMAIN, {}).get(shared_setup_key, False)
-    platforms_to_unload = PLATFORMS if had_shared else TTS_PLATFORMS
+    # had_shared: did THIS entry forward the shared platforms? Every entry does,
+    # so this is effectively always True; it decides which platforms to unload.
+    # is_owner: did this entry actually CREATE the shared select/text/button
+    # entities? Only the owner triggers a survivor reload - gating on had_shared
+    # instead would make every non-owner unload reload the others (an endless
+    # ping-pong). See shared.py for the bookkeeping details.
+    platforms_to_unload = PLATFORMS if has_forwarded_shared(hass, entry) else TTS_PLATFORMS
+    is_owner = is_shared_owner(hass, entry)
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms_to_unload)
+    if not unload_ok:
+        return False
 
-    if unload_ok:
-        if is_last_entry:
-            LOGGER.debug("Last TikTokTTS config entry unloaded - clearing all data")
-            hass.data.pop(DOMAIN, None)
-        elif had_shared and DOMAIN in hass.data:
-            # The entry that owned the shared platforms was disabled/removed
-            # but other entries still exist. Clear the singleton flags and the
-            # per-entry setup key so the surviving entry can take ownership
-            # of the shared platforms on its next reload.
-            hass.data[DOMAIN].pop(HASS_DATA_SELECT_CREATED, None)
-            hass.data[DOMAIN].pop(HASS_DATA_TEXT_CREATED, None)
-            hass.data[DOMAIN].pop(HASS_DATA_BUTTON_CREATED, None)
-            hass.data[DOMAIN].pop(HASS_DATA_LANGUAGE_ENTITY, None)
-            hass.data[DOMAIN].pop(shared_setup_key, None)
+    if is_last_entry:
+        LOGGER.debug("Last TikTokTTS config entry unloaded - clearing all data")
+        hass.data.pop(DOMAIN, None)
+        return True
+
+    if DOMAIN in hass.data:
+        # Allow a future (re)load of this entry to forward the shared platforms
+        # again. Doing this for every entry (not just the owner) is what lets a
+        # surviving entry re-forward the shared platforms when reloaded below.
+        clear_shared_forwarded(hass, entry)
+
+        if is_owner:
+            # The entry that created the shared entities is going away while
+            # others remain. Release ownership and reload a survivor so it
+            # recreates the shared entities under its own (enabled) entry,
+            # avoiding HA's "entity disabled by config entry" problem.
+            release_shared_ownership(hass)
             LOGGER.debug(
-                "TikTokTTS entry %s (shared owner) unloaded - singleton flags cleared",
+                "TikTokTTS shared-owner entry %s unloaded - reloading a survivor "
+                "to re-home the shared entities",
                 entry.entry_id,
             )
-            # Trigger a reload of each surviving entry so they pick up the
-            # shared platforms. Use call_soon to avoid reloading during unload.
-            surviving = [e for e in remaining if e.entry_id != entry.entry_id]
-            for survivor in surviving:
-                hass.loop.call_soon(
-                    lambda eid=survivor.entry_id: hass.async_create_task(
-                        hass.config_entries.async_reload(eid)
-                    )
-                )
+            schedule_rehome_to_survivor(hass, entry, remaining)
 
-    return unload_ok
+    return True
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

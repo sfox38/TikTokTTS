@@ -80,7 +80,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.issue_registry import (
     IssueSeverity,
     async_create_issue,
-    async_delete_issue,
 )
 
 from .const import (

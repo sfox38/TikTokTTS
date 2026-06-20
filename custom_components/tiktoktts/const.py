@@ -21,6 +21,9 @@ ORIGINAL_REPO = "https://github.com/philipp-luettecke/tiktoktts"
 FORK_AUTHOR = "Steven Fox (@sfox38)"
 FORK_REPO = "https://github.com/sfox38/tiktoktts"
 
+# Community TTS proxy project (used in config-flow description placeholders).
+WEILBYTE_REPO = "https://github.com/Weilbyte/tiktok-tts"
+
 ATTRIBUTION = (
     f"Originally by {ORIGINAL_AUTHOR} ({ORIGINAL_REPO}). "
     f"Forked and extended by {FORK_AUTHOR} ({FORK_REPO})."
@@ -458,6 +461,11 @@ UNIQUE_ID_SPEAK       = f"{DOMAIN}_speak"
 HASS_DATA_SELECT_CREATED = "shared_select_created"
 HASS_DATA_TEXT_CREATED   = "shared_text_created"
 HASS_DATA_BUTTON_CREATED = "shared_button_created"
+
+# Entry ID of the config entry that actually created the shared select/text/
+# button entities. Every entry forwards the shared platforms, but only this
+# one owns the entities - so only it triggers a survivor reload on unload.
+HASS_DATA_SHARED_OWNER   = "shared_owner_entry_id"
 
 # hass.data[DOMAIN] keys for random voice store
 HASS_DATA_RANDOM_STORE   = "random_voice_store"

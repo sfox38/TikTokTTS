@@ -1,5 +1,8 @@
 # TikTok TTS : Home Assistant Custom Integration
 
+[![Tests](https://github.com/sfox38/tiktoktts/actions/workflows/tests.yml/badge.svg)](https://github.com/sfox38/tiktoktts/actions/workflows/tests.yml)
+[![Validate](https://github.com/sfox38/tiktoktts/actions/workflows/validate.yml/badge.svg)](https://github.com/sfox38/tiktoktts/actions/workflows/validate.yml)
+
 A Home Assistant custom integration that provides Text-to-Speech using TikTok's voice engine, supporting a wide range of languages and expressive voices.
 
 <img src="https://raw.githubusercontent.com/sfox38/tiktoktts/main/examples/dash-custom-v1.2.jpg" width="50%" alt="TikTok TTS dashboard card">
@@ -105,7 +108,7 @@ For better reliability, you can self-host your own proxy instance and enter its 
 
 If both proxy and direct API modes are configured, **proxy mode takes priority** for the Speak button and automations that do not specify an entity ID.
 
-#### Direct API
+#### Direct API ⚠️
 Calls TikTok's internal API directly using your TikTok session cookie.
 
 > [!IMPORTANT]
@@ -510,6 +513,43 @@ The message text entity has a maximum length of 255 characters, which is enforce
 
 ### Check the logs
 Go to **Settings -> System -> Logs** and filter for `tiktoktts` to find detailed error messages.
+
+---
+
+## Changelog
+
+### v1.2.3
+- **Fix:** Configured default voice is now preserved on a fresh start - the voice dropdown no longer reset to the first voice of the language (alphabetically) when there was no restored state to apply
+- **Fix:** Unloading or disabling one config entry when multiple exist no longer triggers an endless reload cascade between entries - only the entry that owns the shared select/text/button entities re-homes them to a surviving entry
+- **Fix:** The Disney / Character group could not be added to the Random Voice pool from the dashboard card - a friendly-name/emoji mismatch sent the label instead of the API code, which was then rejected. The card now reads language codes directly from the language entity (`language_options` attribute), so every language adds correctly regardless of its label
+- **Fix:** Replaced a startup sleep-poll (waited up to 5 s for the voice entity to be ready) with event-driven coordination, so a restored language/voice is applied without the delay
+- **Fix:** The shared select/text helper entities are now non-polling (they are push-based), removing a redundant periodic update cycle
+- **Refactor:** Replaced the Lovelace card registration, which relied on Home Assistant's private Lovelace resources internals (and could break on a core update), with the supported `frontend.add_extra_js_url` helper. This also removes the resource-load polling loop and now works in YAML dashboard mode too
+- **Refactor:** Extracted the shared select/text/button lifecycle bookkeeping into a dedicated `shared.py` module and flattened the setup/unload logic for readability - no behaviour change (proxy + direct can still run as two entries)
+- **Refactor:** The voice dropdown now maps friendly labels to API codes via a dictionary instead of two index-aligned lists, removing a class of mismatch bug
+- **Perf:** The device dropdown no longer rebuilds on every media-player attribute tick (volume, position); it refreshes only when a player appears, disappears, or changes availability
+- **Cleanup:** Removed an unused import, de-duplicated the voice list via the existing `ALL_VOICES` constant, and tightened type hints
+- **Doc:** Added mesa_profile.json
+
+### v1.2.2
+- **Fix:** Lovelace card resource is now removed only on true integration deletion, not on every reload or options save (was wiping the card resource on every settings change)
+- **Fix:** Language-aware voice fallback - if the configured default voice is not available for the requested language, the integration now correctly falls back to the first voice of that language (matches the documented behaviour)
+- **Fix:** Direct API retry tuning - the configured endpoint gets 3 attempts × 20 s; each automatic fallback endpoint gets 1 attempt × 10 s (was using the same retry count for all endpoints)
+- **Fix:** All failure paths now raise `HomeAssistantError` so errors surface in the HA UI and automation traces instead of silently returning empty audio
+- **Fix:** `aiohttp` sessions are now properly closed via `async with` context managers (previously leaked connections on errors)
+- **Fix:** Options flow now saves sanitized values (trailing slashes stripped from endpoint, whitespace stripped from session_id) instead of raw user input
+- **Fix:** `async_delete_issue` is now called after a successful direct-API options save, clearing the expired-session repair issue
+- **Fix:** Voice dropdown no longer resets on every random-voice pool save - only resets when the language actually changes
+- **Fix:** Restored voice is now correctly re-applied after restart even when the restored language differs from the startup default
+- **Fix:** `button.tiktoktts_speak` now guards against speaking the literal strings "unavailable" or "unknown"
+- **Fix:** `ConfigEntryState` import moved to module level in button.py
+- **Fix:** Redundant `native_value` property removed from `MessageTextEntity` (base class handles `_attr_native_value`)
+- **Fix:** JS card - Speak button now cancels any pending debounce and flushes the current message to HA before pressing the button, preventing a race where the last typed characters could be missed
+- **Fix:** `services.yaml` - `languages` field now uses a proper multi-select selector with all 16 language codes instead of a bare `object` selector
+- **Fix:** Dead `"unknown"` error key removed from `strings.json` and `translations/en.json`
+- **Fix:** Lovelace resource URL match tightened to exact path equality (was `startsWith`, could match unrelated resources)
+- **Fix:** `manifest.json` version now read lazily via executor job in `frontend/__init__.py` to avoid blocking I/O on the event loop at import time
+- **Docs:** README corrected - cache limitation for `voice: random` in automations, chunking behaviour, proxy privacy note, proxy-wins-over-direct note, GitHub capitalisation, image tag attributes
 
 ---
 

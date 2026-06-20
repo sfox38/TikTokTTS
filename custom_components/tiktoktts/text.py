@@ -64,6 +64,7 @@ class MessageTextEntity(TextEntity, RestoreEntity):
     """
 
     _attr_has_entity_name = False
+    _attr_should_poll = False
     _attr_icon = "mdi:message-text"
     _attr_mode = TextMode.TEXT
     _attr_native_min = 0
